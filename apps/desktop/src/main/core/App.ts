@@ -12,6 +12,7 @@ import { IServiceModule } from '@/services';
 import { IpcClientEventSender } from '@/types/ipcClientEvent';
 import { createLogger } from '@/utils/logger';
 import { CustomRequestHandler, createHandler } from '@/utils/next-electron-rsc';
+import { getProtocolScheme } from '@/utils/protocol';
 
 import { BrowserManager } from './browser/BrowserManager';
 import { I18nManager } from './infrastructure/I18nManager';
@@ -49,6 +50,11 @@ export class App {
    * whether app is in quiting
    */
   isQuiting: boolean = false;
+
+  /**
+   * pending protocol URLs that need to be processed after app ready
+   */
+  private pendingProtocolUrls: string[] = [];
 
   get appStoragePath() {
     const storagePath = this.storeManager.get('storagePath');
@@ -105,6 +111,9 @@ export class App {
     // it should register before app ready
     this.registerNextHandler();
 
+    // register protocol handlers
+    this.registerProtocolHandlers();
+
     // 统一处理 before-quit 事件
     app.on('before-quit', this.handleBeforeQuit);
 
@@ -160,6 +169,10 @@ export class App {
     });
 
     app.on('activate', this.onActivate);
+
+    // Process any pending protocol URLs after everything is ready
+    this.processPendingProtocolUrls();
+
     logger.info('Application bootstrap completed');
   };
 
@@ -407,5 +420,119 @@ export class App {
     // 执行清理操作
     this.staticFileServerManager.destroy();
     this.unregisterAllRequestHandlers();
+  };
+
+  // ============= Protocol Handlers ============= //
+
+  /**
+   * Register protocol handlers for dynamic scheme
+   */
+  private registerProtocolHandlers = () => {
+    const protocolScheme = getProtocolScheme();
+    logger.debug(`Registering protocol handlers for ${protocolScheme}://`);
+
+    // Register as default protocol client
+    if (!app.setAsDefaultProtocolClient(protocolScheme)) {
+      logger.warn(`Failed to register as default protocol client for ${protocolScheme}://`);
+    } else {
+      logger.debug(`Successfully registered ${protocolScheme}:// protocol`);
+    }
+
+    // Handle protocol URL from cold start (Windows/Linux)
+    const protocolUrl = this.getProtocolUrlFromArgs(process.argv);
+    if (protocolUrl) {
+      logger.debug(`Found protocol URL from cold start: ${protocolUrl}`);
+      this.pendingProtocolUrls.push(protocolUrl);
+    }
+
+    // Handle protocol URL from macOS open-url event
+    app.on('open-url', (event, url) => {
+      event.preventDefault();
+      logger.debug(`Received protocol URL from open-url: ${url}`);
+      this.handleProtocolUrl(url);
+    });
+
+    // Handle protocol URL from second instance (Windows/Linux)
+    app.on('second-instance', (event, commandLine) => {
+      const url = this.getProtocolUrlFromArgs(commandLine);
+      if (url) {
+        logger.debug(`Received protocol URL from second instance: ${url}`);
+        this.handleProtocolUrl(url);
+      }
+      this.browserManager.showMainWindow();
+    });
+  };
+
+  /**
+   * Extract protocol URL from command line arguments
+   */
+  private getProtocolUrlFromArgs = (args: string[]): string | null => {
+    const protocolScheme = getProtocolScheme();
+    const protocolPrefix = `${protocolScheme}://`;
+
+    for (const arg of args) {
+      if (arg.startsWith(protocolPrefix)) {
+        return arg;
+      }
+    }
+    return null;
+  };
+
+  /**
+   * Handle protocol URL - either immediately or store for later processing
+   */
+  private handleProtocolUrl = (url: string) => {
+    try {
+      logger.debug(`Processing protocol URL: ${url}`);
+
+      if (!app.isReady()) {
+        // App not ready yet, store for later processing
+        logger.debug('App not ready, storing protocol URL for later processing');
+        this.pendingProtocolUrls.push(url);
+        return;
+      }
+
+      // App is ready, process immediately
+      this.processProtocolUrl(url);
+    } catch (error) {
+      logger.error('Failed to handle protocol URL:', error);
+    }
+  };
+
+  /**
+   * Process protocol URL by showing main window and sending to renderer
+   */
+  private processProtocolUrl = (url: string) => {
+    try {
+      logger.debug(`Sending protocol URL to renderer: ${url}`);
+
+      // Show main window
+      this.browserManager.showMainWindow();
+
+      // Send protocol URL to renderer process
+      this.browserManager.broadcastToWindow('chat', 'requestProtocolInstall', { url });
+
+      logger.debug('Protocol URL processed successfully');
+    } catch (error) {
+      logger.error('Failed to process protocol URL:', error);
+    }
+  };
+
+  /**
+   * Process any pending protocol URLs after app is ready
+   */
+  processPendingProtocolUrls = () => {
+    if (this.pendingProtocolUrls.length === 0) {
+      return;
+    }
+
+    logger.debug(`Processing ${this.pendingProtocolUrls.length} pending protocol URLs`);
+
+    for (const url of this.pendingProtocolUrls) {
+      this.processProtocolUrl(url);
+    }
+
+    // Clear pending URLs
+    this.pendingProtocolUrls = [];
   };
 }
