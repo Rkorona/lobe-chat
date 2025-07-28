@@ -7,8 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { FormInput, FormPassword } from '@/components/FormInput';
 import { AzureProviderCard } from '@/config/modelProviders';
 import { ModelProvider } from '@/libs/model-runtime';
-import { aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
-import { useUserStore } from '@/store/user';
+import { aiModelSelectors, aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
 
 import { KeyVaultsConfigKey, LLMProviderApiTokenKey, LLMProviderBaseUrlKey } from '../../const';
 import { SkeletonInput } from '../../features/ProviderConfig';
@@ -34,16 +33,13 @@ const useProviderCard = (): ProviderItem => {
   const { styles } = useStyles();
 
   // Get the first model card's deployment name as the check model
-  const checkModel = useUserStore((s) => {
-    // TODO: add getModelCardsById
-    // @ts-ignore
-    const chatModelCards = aiProviderSelectors.getModelCardsById(providerKey)(s);
+  const checkModel = useAiInfraStore((s) => {
+    const chatModelCards = aiModelSelectors.enabledAiProviderModelList(s);
 
-    if (chatModelCards.length > 0) {
-      return chatModelCards[0].deploymentName;
-    }
+    if (chatModelCards.length > 0 && chatModelCards[0].config?.deploymentName)
+      return chatModelCards[0].config?.deploymentName;
 
-    return 'gpt-35-turbo';
+    return 'gpt-4.1-mini';
   });
 
   const isLoading = useAiInfraStore(aiProviderSelectors.isAiProviderConfigLoading(providerKey));
