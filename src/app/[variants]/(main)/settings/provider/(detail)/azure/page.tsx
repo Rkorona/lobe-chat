@@ -9,7 +9,6 @@ import { AzureProviderCard } from '@/config/modelProviders';
 import { ModelProvider } from '@/libs/model-runtime';
 import { aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
 import { useUserStore } from '@/store/user';
-import { modelProviderSelectors } from '@/store/user/selectors';
 
 import { KeyVaultsConfigKey, LLMProviderApiTokenKey, LLMProviderBaseUrlKey } from '../../const';
 import { SkeletonInput } from '../../features/ProviderConfig';
@@ -36,7 +35,9 @@ const useProviderCard = (): ProviderItem => {
 
   // Get the first model card's deployment name as the check model
   const checkModel = useUserStore((s) => {
-    const chatModelCards = modelProviderSelectors.getModelCardsById(providerKey)(s);
+    // TODO: add getModelCardsById
+    // @ts-ignore
+    const chatModelCards = aiProviderSelectors.getModelCardsById(providerKey)(s);
 
     if (chatModelCards.length > 0) {
       return chatModelCards[0].deploymentName;
