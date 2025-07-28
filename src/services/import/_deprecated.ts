@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { MessageModel } from '@/database/_deprecated/models/message';
 import { SessionModel } from '@/database/_deprecated/models/session';
 import { SessionGroupModel } from '@/database/_deprecated/models/sessionGroup';
