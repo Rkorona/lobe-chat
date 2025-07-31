@@ -25,17 +25,39 @@
             font-family: monospace; 
         }
         .section { margin: 32px 0; }
+        .scheme-selector {
+            margin: 16px 0;
+        }
+        .scheme-selector select {
+            padding: 8px;
+            margin-left: 8px;
+        }
     </style>
 </head>
 <body>
     <h1>🚀 LobeChat 协议URL测试</h1>
     
     <div class="section">
+        <h2>协议版本选择：</h2>
+        <div class="scheme-selector">
+            <label>选择协议类型：</label>
+            <select id="schemeSelect">
+                <option value="lobehub-dev">lobehub-dev:// (开发环境)</option>
+                <option value="lobehub">lobehub:// (正式版)</option>
+                <option value="lobehub-beta">lobehub-beta:// (Beta版)</option>
+                <option value="lobehub-nightly">lobehub-nightly:// (Nightly版)</option>
+            </select>
+            <button onclick="updateUrls()">更新URL</button>
+        </div>
+    </div>
+    
+    <div class="section">
         <h2>测试步骤：</h2>
         <ol>
-            <li>确保 LobeChat Desktop 应用正在运行</li>
+            <li>选择正确的协议类型（开发环境选择 lobehub-dev）</li>
+            <li>确保对应的 LobeChat 应用正在运行</li>
             <li>点击下面的测试链接</li>
-            <li>系统应该会唤起 LobeChat Desktop</li>
+            <li>系统应该会唤起对应的 LobeChat 应用</li>
             <li>应用内应该会显示插件安装确认对话框</li>
         </ol>
     </div>
@@ -60,15 +82,15 @@
         <h2>🔧 手动测试</h2>
         <p>你也可以直接复制URL到地址栏或命令行测试：</p>
         <h4>macOS 命令行测试:</h4>
-        <div class="url-box">open "lobehub://plugin/install?type=mcp&id=test&schema=..."</div>
+        <div class="url-box" id="mac-cmd"></div>
         <h4>Windows 命令行测试:</h4>
-        <div class="url-box">start "lobehub://plugin/install?type=mcp&id=test&schema=..."</div>
+        <div class="url-box" id="win-cmd"></div>
     </div>
 
     <script>
         // 生成测试协议URL的函数
         function generateRFCProtocolUrl(params) {
-            const { id, schema, marketId, metaParams = {}, scheme = 'lobehub' } = params;
+            const { id, schema, marketId, metaParams = {}, scheme = 'lobehub-dev' } = params;
             
             const baseUrl = `${scheme}://plugin/install`;
             const searchParams = new URLSearchParams();
@@ -110,16 +132,6 @@
             }
         };
 
-        const stdioUrl = generateRFCProtocolUrl({
-            id: 'edgeone-mcp-test',
-            schema: stdioSchema,
-            marketId: 'higress',
-            metaParams: {
-                author: 'Higress Team',
-                category: 'api-integration'
-            }
-        });
-
         // 测试用例 2: http 类型
         const httpSchema = {
             identifier: 'awesome-api-test',
@@ -137,12 +149,6 @@
             }
         };
 
-        const httpUrl = generateRFCProtocolUrl({
-            id: 'awesome-api-test',
-            schema: httpSchema,
-            marketId: 'smithery'
-        });
-
         // 测试用例 3: 特殊字符
         const specialSchema = {
             identifier: 'special-chars-test',
@@ -157,37 +163,69 @@
             }
         };
 
-        const specialUrl = generateRFCProtocolUrl({
-            id: 'special-chars-test',
-            schema: specialSchema,
-            metaParams: {
-                emoji: '🎉',
-                chinese: '中文测试'
-            }
-        });
+        function updateUrls() {
+            const scheme = document.getElementById('schemeSelect').value;
+            
+            const stdioUrl = generateRFCProtocolUrl({
+                id: 'edgeone-mcp-test',
+                schema: stdioSchema,
+                marketId: 'higress',
+                metaParams: {
+                    author: 'Higress Team',
+                    category: 'api-integration'
+                },
+                scheme
+            });
 
-        // 设置URL和链接
-        document.getElementById('stdio-url').textContent = stdioUrl;
-        document.getElementById('stdio-link').href = stdioUrl;
-        
-        document.getElementById('http-url').textContent = httpUrl;
-        document.getElementById('http-link').href = httpUrl;
-        
-        document.getElementById('special-url').textContent = specialUrl;
-        document.getElementById('special-link').href = specialUrl;
+            const httpUrl = generateRFCProtocolUrl({
+                id: 'awesome-api-test',
+                schema: httpSchema,
+                marketId: 'smithery',
+                scheme
+            });
+
+            const specialUrl = generateRFCProtocolUrl({
+                id: 'special-chars-test',
+                schema: specialSchema,
+                metaParams: {
+                    emoji: '🎉',
+                    chinese: '中文测试'
+                },
+                scheme
+            });
+
+            // 设置URL和链接
+            document.getElementById('stdio-url').textContent = stdioUrl;
+            document.getElementById('stdio-link').href = stdioUrl;
+            
+            document.getElementById('http-url').textContent = httpUrl;
+            document.getElementById('http-link').href = httpUrl;
+            
+            document.getElementById('special-url').textContent = specialUrl;
+            document.getElementById('special-link').href = specialUrl;
+
+            // 设置命令行示例
+            document.getElementById('mac-cmd').textContent = `open "${stdioUrl}"`;
+            document.getElementById('win-cmd').textContent = `start "${stdioUrl}"`;
+
+            console.log('🧪 测试URL已更新 (scheme:', scheme + '):');
+            console.log('stdio:', stdioUrl);
+            console.log('http:', httpUrl);
+            console.log('special:', specialUrl);
+        }
+
+        // 页面加载时默认使用开发环境协议
+        document.addEventListener('DOMContentLoaded', function() {
+            updateUrls();
+        });
 
         // 添加点击事件日志
-        document.querySelectorAll('.test-link').forEach(link => {
-            link.addEventListener('click', (e) => {
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('test-link')) {
                 console.log('点击协议链接:', e.target.href);
                 // 不阻止默认行为，让系统处理协议链接
-            });
+            }
         });
-
-        console.log('🧪 测试URL已生成:');
-        console.log('stdio:', stdioUrl);
-        console.log('http:', httpUrl);
-        console.log('special:', specialUrl);
     </script>
 </body>
 </html> 
