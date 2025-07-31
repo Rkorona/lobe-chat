@@ -29,6 +29,7 @@ const logger = createLogger('core:App');
 
 export type IPCEventMap = Map<string, { controller: any; methodName: string }>;
 export type ShortcutMethodMap = Map<string, () => Promise<void>>;
+export type ProtocolHandlerMap = Map<string, { controller: any; methodName: string }>;
 
 type Class<T> = new (...args: any[]) => T;
 
@@ -169,7 +170,7 @@ export class App {
     app.on('activate', this.onActivate);
 
     // Process any pending protocol URLs after everything is ready
-    this.protocolManager.processPendingUrls();
+    await this.protocolManager.processPendingUrls();
 
     logger.info('Application bootstrap completed');
   };
@@ -180,6 +181,32 @@ export class App {
 
   getController<T>(controllerClass: Class<T>): T {
     return this.controllers.get(controllerClass);
+  }
+
+  /**
+   * Handle protocol request by dispatching to registered handlers
+   * @param urlType 协议URL类型 (如: 'plugin')
+   * @param action 操作类型 (如: 'install')
+   * @param url 完整的协议URL
+   * @returns 是否成功处理
+   */
+  async handleProtocolRequest(urlType: string, action: string, url: string): Promise<boolean> {
+    const key = `${urlType}:${action}`;
+    const handler = this.protocolHandlerMap.get(key);
+    
+    if (!handler) {
+      logger.warn(`No protocol handler found for ${key}`);
+      return false;
+    }
+
+    try {
+      logger.debug(`Dispatching protocol request ${key} to controller`);
+      const result = await handler.controller[handler.methodName](url);
+      return result !== false; // 假设控制器返回 false 表示处理失败
+    } catch (error) {
+      logger.error(`Error handling protocol request ${key}:`, error);
+      return false;
+    }
   }
 
   private onActivate = () => {
@@ -244,6 +271,7 @@ export class App {
   private ipcClientEventMap: IPCEventMap = new Map();
   private ipcServerEventMap: IPCEventMap = new Map();
   shortcutMethodMap: ShortcutMethodMap = new Map();
+  protocolHandlerMap: ProtocolHandlerMap = new Map();
 
   /**
    * use in next router interceptor in prod browser render
@@ -317,6 +345,14 @@ export class App {
     IoCContainer.shortcuts.get(ControllerClass)?.forEach((shortcut) => {
       this.shortcutMethodMap.set(shortcut.name, async () => {
         controller[shortcut.methodName]();
+      });
+    });
+
+    IoCContainer.protocolHandlers.get(ControllerClass)?.forEach((handler) => {
+      const key = `${handler.urlType}:${handler.action}`;
+      this.protocolHandlerMap.set(key, {
+        controller,
+        methodName: handler.methodName,
       });
     });
   };

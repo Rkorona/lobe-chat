@@ -89,8 +89,8 @@ function mapMarketIdToSource(marketId?: string): ProtocolSource {
 
   // 根据 marketId 映射到对应的 source
   const marketSourceMap: Record<string, ProtocolSource> = {
-    higress: ProtocolSource.THIRD_PARTY,
     lobehub: ProtocolSource.OFFICIAL,
+    higress: ProtocolSource.THIRD_PARTY,
     smithery: ProtocolSource.THIRD_PARTY,
     // 可以添加更多映射
   };
@@ -103,8 +103,9 @@ function mapMarketIdToSource(marketId?: string): ProtocolSource {
  *
  * 支持的URL格式：
  * - lobehub://plugin/install?type=mcp&id=figma&schema=xxx&marketId=lobehub
- * - lobehub-nightly://plugin/install?type=mcp&id=figma&schema=xxx&marketId=lobehub
  * - lobehub-beta://plugin/install?type=mcp&id=figma&schema=xxx&marketId=lobehub
+ * - lobehub-nightly://plugin/install?type=mcp&id=figma&schema=xxx&marketId=lobehub
+ * - lobehub-dev://plugin/install?type=mcp&id=figma&schema=xxx&marketId=lobehub
  *
  * @param url 协议URL
  * @returns 解析结果
@@ -114,16 +115,22 @@ export function parseProtocolUrl(url: string): ProtocolUrlParsed | null {
     const parsedUrl = new URL(url);
 
     // 支持多种协议 scheme
-    const validProtocols = ['lobehub:', 'lobehub-nightly:', 'lobehub-beta:'];
+    const validProtocols = ['lobehub:', 'lobehub-dev:', 'lobehub-nightly:', 'lobehub-beta:'];
     if (!validProtocols.includes(parsedUrl.protocol)) {
       return null;
     }
 
-    // 在自定义协议中，hostname 是第一部分，pathname 是剩余部分
-    // 例如：lobehub://plugin/install -> hostname: "plugin", pathname: "/install"
-    const urlType = parsedUrl.hostname;
-    const pathPart = parsedUrl.pathname.split('/').find(Boolean);
-    const action = pathPart;
+    // 对于自定义协议，URL 解析后：
+    // lobehub://plugin/install -> hostname: "plugin", pathname: "/install"
+    // 我们需要结合 hostname 和 pathname 来构造完整路径
+    const urlType = parsedUrl.hostname; // "plugin"
+    const pathParts = parsedUrl.pathname.split('/').filter(Boolean); // ["install"]
+    
+    if (pathParts.length < 1) {
+      return null;
+    }
+
+    const action = pathParts[0]; // "install"
 
     // RFC 要求路径为 /plugin/install
     if (urlType !== 'plugin' || action !== 'install') {
@@ -175,13 +182,22 @@ export function parseProtocolUrl(url: string): ProtocolUrlParsed | null {
       }
     }
 
+    // 映射协议来源
+    const source = mapMarketIdToSource(marketId);
+
     // 返回符合新接口的对象
     return {
+      urlType,
       action: 'install',
-      marketId,
-      metaParams,
-      schema: mcpSchema,
       type: 'mcp',
+      params: {
+        id,
+        type,
+        marketId,
+        metaParams,
+      },
+      schema: mcpSchema,
+      source,
     };
   } catch (error) {
     console.error('Failed to parse RFC protocol URL:', error);

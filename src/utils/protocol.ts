@@ -13,6 +13,7 @@ export function getProtocolScheme(): string {
     const packageName = process.env.npm_package_name;
     if (packageName?.includes('nightly')) return 'lobehub-nightly';
     if (packageName?.includes('beta')) return 'lobehub-beta';
+    if (packageName?.includes('dev')) return 'lobehub-dev';
   }
 
   return 'lobehub';
@@ -92,17 +93,22 @@ export function parseProtocolUrl(url: string): ProtocolUrlParsed | null {
     const parsedUrl = new URL(url);
     
     // 支持多种协议 scheme
-    const validProtocols = ['lobehub:', 'lobehub-nightly:', 'lobehub-beta:'];
+    const validProtocols = ['lobehub:', 'lobehub-dev:', 'lobehub-nightly:', 'lobehub-beta:'];
     if (!validProtocols.includes(parsedUrl.protocol)) {
       return null;
     }
     
-    const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
-    if (pathParts.length < 2) {
+    // 对于自定义协议，URL 解析后：
+    // lobehub://plugin/install -> hostname: "plugin", pathname: "/install"
+    // 我们需要结合 hostname 和 pathname 来构造完整路径
+    const urlType = parsedUrl.hostname; // "plugin"
+    const pathParts = parsedUrl.pathname.split('/').filter(Boolean); // ["install"]
+    
+    if (pathParts.length < 1) {
       return null;
     }
     
-    const [urlType, action] = pathParts;
+    const action = pathParts[0]; // "install"
     
     // RFC 要求路径为 /plugin/install
     if (urlType !== 'plugin' || action !== 'install') {
@@ -154,13 +160,22 @@ export function parseProtocolUrl(url: string): ProtocolUrlParsed | null {
       }
     }
     
+    // 映射协议来源
+    const source = mapMarketIdToSource(marketId);
+    
     // 返回符合新接口的对象
     return {
-      type: 'mcp',
+      urlType,
       action: 'install',
+      type: 'mcp',
+      params: {
+        id,
+        type,
+        marketId,
+        metaParams,
+      },
       schema: mcpSchema,
-      marketId,
-      metaParams,
+      source,
     };
   } catch (error) {
     console.error('Failed to parse RFC protocol URL:', error);

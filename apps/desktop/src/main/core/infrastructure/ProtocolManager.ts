@@ -1,8 +1,8 @@
 import { app } from 'electron';
 
 import { isDev } from '@/const/env';
-import { getProtocolScheme, parseProtocolUrl } from '@/utils/protocol';
 import { createLogger } from '@/utils/logger';
+import { getProtocolScheme, parseProtocolUrl } from '@/utils/protocol';
 
 import { App } from '../App';
 
@@ -29,10 +29,10 @@ export class ProtocolManager {
    */
   public initialize(): void {
     logger.debug('Setting up protocol handlers');
-    
+
     this.registerProtocolHandlers();
     this.setupEventListeners();
-    
+
     logger.debug('Protocol initialization completed');
   }
 
@@ -41,7 +41,7 @@ export class ProtocolManager {
    */
   private registerProtocolHandlers(): void {
     logger.debug(`🔗 [Protocol] Registering protocol handlers for ${this.protocolScheme}://`);
-    
+
     // Debug info about current app
     logger.debug(`🔗 [Protocol] App name: ${app.name}`);
     logger.debug(`🔗 [Protocol] App path: ${app.getPath('exe')}`);
@@ -54,7 +54,7 @@ export class ProtocolManager {
 
     // Register as default protocol client
     let registrationResult: boolean;
-    
+
     if (isDev) {
       // In development, use explicit parameters to ensure proper registration
       const appPath = process.cwd(); // Current working directory (our app)
@@ -62,25 +62,25 @@ export class ProtocolManager {
       logger.debug(`🔗 [Protocol] Executable path: ${process.execPath}`);
       logger.debug(`🔗 [Protocol] App path: ${appPath}`);
       logger.debug(`🔗 [Protocol] Arguments: ${JSON.stringify([appPath])}`);
-      
-      registrationResult = app.setAsDefaultProtocolClient(
-        this.protocolScheme,
-        process.execPath,
-        [appPath],
-      );
+
+      registrationResult = app.setAsDefaultProtocolClient(this.protocolScheme, process.execPath, [
+        appPath,
+      ]);
     } else {
       // In production, use simple registration
       registrationResult = app.setAsDefaultProtocolClient(this.protocolScheme);
     }
-    
+
     logger.debug(`🔗 [Protocol] Registration result: ${registrationResult}`);
-    
+
     if (!registrationResult) {
-      logger.error(`🔗 [Protocol] Failed to register as default protocol client for ${this.protocolScheme}://`);
+      logger.error(
+        `🔗 [Protocol] Failed to register as default protocol client for ${this.protocolScheme}://`,
+      );
     } else {
       logger.debug(`🔗 [Protocol] Successfully registered ${this.protocolScheme}:// protocol`);
     }
-    
+
     // Verify registration
     const isRegisteredAfter = app.isDefaultProtocolClient(this.protocolScheme);
     logger.debug(`🔗 [Protocol] Final registration status: ${isRegisteredAfter}`);
@@ -123,7 +123,7 @@ export class ProtocolManager {
    */
   private getProtocolUrlFromArgs(args: string[]): string | null {
     const protocolPrefix = `${this.protocolScheme}://`;
-    
+
     logger.debug(`🔗 [Protocol] Searching for protocol URLs in args: ${JSON.stringify(args)}`);
     logger.debug(`🔗 [Protocol] Looking for prefix: ${protocolPrefix}`);
 
@@ -165,33 +165,41 @@ export class ProtocolManager {
   /**
    * Process protocol URL by showing main window and sending to renderer
    */
-  private processProtocolUrl(url: string): void {
+  private async processProtocolUrl(url: string): Promise<void> {
     try {
       logger.debug(`🔗 [Protocol] processProtocolUrl called with: ${url}`);
-      
-      // Parse the URL first to validate
-      const parsed = parseProtocolUrl(url);
-      if (parsed) {
-        logger.debug(`🔗 [Protocol] URL parsed successfully:`, {
-          action: parsed.action,
-          params: { ...parsed.params, schema: '[SCHEMA_OBJECT]' },
-          urlType: parsed.urlType, // Hide schema details for readability
-        });
-      } else {
-        logger.warn(`🔗 [Protocol] Failed to parse URL: ${url}`);
+
+      // Basic URL validation - just check if it's our protocol
+      if (!url.startsWith(`${this.protocolScheme}://`)) {
+        logger.warn(`🔗 [Protocol] Invalid protocol scheme in URL: ${url}`);
+        return;
       }
 
       // Show main window
       logger.debug('🔗 [Protocol] Showing main window...');
       this.app.browserManager.showMainWindow();
 
-      // Send protocol URL to renderer process
-      logger.debug(`🔗 [Protocol] Broadcasting to chat window: requestProtocolInstall`);
-      logger.debug(`🔗 [Protocol] Broadcast payload:`, { url });
-      
-      this.app.browserManager.broadcastToWindow('chat', 'requestProtocolInstall', { url });
+      // Parse protocol URL to extract urlType and action
+      const parsed = parseProtocolUrl(url);
 
-      logger.debug('🔗 [Protocol] Protocol URL processed successfully');
+      if (!parsed) {
+        logger.warn(`🔗 [Protocol] Failed to parse protocol URL: ${url}`);
+        return;
+      }
+
+      logger.debug(`🔗 [Protocol] Parsed URL - type: ${parsed.urlType}, action: ${parsed.action}`);
+
+      // Dispatch to registered protocol handlers via App
+      logger.debug('🔗 [Protocol] Dispatching to protocol handlers...');
+      const handled = await this.app.handleProtocolRequest(parsed.urlType, parsed.action, url);
+
+      if (handled) {
+        logger.debug('🔗 [Protocol] Protocol URL processed successfully by handler');
+      } else {
+        logger.warn(
+          `🔗 [Protocol] No handler found for protocol: ${parsed.urlType}:${parsed.action}`,
+        );
+      }
     } catch (error) {
       logger.error('🔗 [Protocol] Failed to process protocol URL:', error);
       logger.error('🔗 [Protocol] Error details:', error);
@@ -201,10 +209,10 @@ export class ProtocolManager {
   /**
    * Process any pending protocol URLs after app is ready
    */
-  public processPendingUrls(): void {
+  public async processPendingUrls(): Promise<void> {
     logger.debug(`🔗 [Protocol] processPendingUrls called`);
     logger.debug(`🔗 [Protocol] Pending URLs count: ${this.pendingUrls.length}`);
-    
+
     if (this.pendingUrls.length === 0) {
       logger.debug(`🔗 [Protocol] No pending URLs to process`);
       return;
@@ -217,7 +225,7 @@ export class ProtocolManager {
 
     for (const url of this.pendingUrls) {
       logger.debug(`🔗 [Protocol] Processing pending URL: ${url}`);
-      this.processProtocolUrl(url);
+      await this.processProtocolUrl(url);
     }
 
     // Clear pending URLs
@@ -238,4 +246,4 @@ export class ProtocolManager {
   public isRegistered(): boolean {
     return app.isDefaultProtocolClient(this.protocolScheme);
   }
-} 
+}

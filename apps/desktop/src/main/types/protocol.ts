@@ -76,11 +76,23 @@ export interface McpInstallProtocolParamsRFC {
  * 协议URL解析结果
  */
 export interface ProtocolUrlParsed {
+  /** URL类型 (如: 'plugin') */
+  urlType: string;
+  /** 操作类型 (如: 'install') */
   action: 'install' | 'configure' | 'update';
-  marketId?: string;
-  metaParams: Record<string, string>;
-  schema: McpSchema;
+  /** 插件类型 (如: 'mcp') */
   type: 'mcp' | 'plugin';
+  /** 解析后的参数 */
+  params: {
+    id: string;
+    type: string;
+    marketId?: string;
+    metaParams: Record<string, string>;
+  };
+  /** MCP Schema 对象 */
+  schema: McpSchema;
+  /** 协议来源 */
+  source: ProtocolSource;
 }
 
 /**
