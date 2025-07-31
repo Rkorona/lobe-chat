@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LobeChat 协议URL测试</title>
+    <style>
+        body { font-family: system-ui; margin: 40px; line-height: 1.6; }
+        .test-link { 
+            display: inline-block; 
+            padding: 12px 24px; 
+            background: #1677ff; 
+            color: white; 
+            text-decoration: none; 
+            border-radius: 6px; 
+            margin: 8px 0; 
+        }
+        .test-link:hover { background: #0958d9; }
+        .url-box { 
+            background: #f5f5f5; 
+            padding: 12px; 
+            border-radius: 4px; 
+            word-break: break-all; 
+            margin: 8px 0; 
+            font-family: monospace; 
+        }
+        .section { margin: 32px 0; }
+    </style>
+</head>
+<body>
+    <h1>🚀 LobeChat 协议URL测试</h1>
+    
+    <div class="section">
+        <h2>测试步骤：</h2>
+        <ol>
+            <li>确保 LobeChat Desktop 应用正在运行</li>
+            <li>点击下面的测试链接</li>
+            <li>系统应该会唤起 LobeChat Desktop</li>
+            <li>应用内应该会显示插件安装确认对话框</li>
+        </ol>
+    </div>
+
+    <div class="section">
+        <h2>📋 测试用例</h2>
+        
+        <h3>1. stdio 类型插件 (EdgeOne MCP)</h3>
+        <div class="url-box" id="stdio-url"></div>
+        <a href="#" class="test-link" id="stdio-link">📦 测试安装 EdgeOne MCP (stdio)</a>
+        
+        <h3>2. http 类型插件 (Awesome API)</h3>
+        <div class="url-box" id="http-url"></div>
+        <a href="#" class="test-link" id="http-link">🌐 测试安装 Awesome API (http)</a>
+        
+        <h3>3. 包含特殊字符的插件</h3>
+        <div class="url-box" id="special-url"></div>
+        <a href="#" class="test-link" id="special-link">✨ 测试特殊字符插件</a>
+    </div>
+
+    <div class="section">
+        <h2>🔧 手动测试</h2>
+        <p>你也可以直接复制URL到地址栏或命令行测试：</p>
+        <h4>macOS 命令行测试:</h4>
+        <div class="url-box">open "lobehub://plugin/install?type=mcp&id=test&schema=..."</div>
+        <h4>Windows 命令行测试:</h4>
+        <div class="url-box">start "lobehub://plugin/install?type=mcp&id=test&schema=..."</div>
+    </div>
+
+    <script>
+        // 生成测试协议URL的函数
+        function generateRFCProtocolUrl(params) {
+            const { id, schema, marketId, metaParams = {}, scheme = 'lobehub' } = params;
+            
+            const baseUrl = `${scheme}://plugin/install`;
+            const searchParams = new URLSearchParams();
+            
+            searchParams.set('type', 'mcp');
+            searchParams.set('id', id);
+            
+            const schemaJson = JSON.stringify(schema);
+            searchParams.set('schema', schemaJson);
+            
+            if (marketId) {
+                searchParams.set('marketId', marketId);
+            }
+            
+            for (const [key, value] of Object.entries(metaParams)) {
+                if (!key.startsWith('meta_')) {
+                    searchParams.set(`meta_${key}`, value);
+                } else {
+                    searchParams.set(key, value);
+                }
+            }
+            
+            return `${baseUrl}?${searchParams.toString()}`;
+        }
+
+        // 测试用例 1: stdio 类型
+        const stdioSchema = {
+            identifier: 'edgeone-mcp-test',
+            name: 'EdgeOne MCP Test',
+            author: 'Higress Team',
+            description: 'EdgeOne API integration for LobeChat (测试版)',
+            version: '1.0.0',
+            homepage: 'https://github.com/higress/edgeone-mcp',
+            config: {
+                type: 'stdio',
+                command: 'npx',
+                args: ['-y', '@higress/edgeone-mcp'],
+                env: { NODE_ENV: 'production' }
+            }
+        };
+
+        const stdioUrl = generateRFCProtocolUrl({
+            id: 'edgeone-mcp-test',
+            schema: stdioSchema,
+            marketId: 'higress',
+            metaParams: {
+                author: 'Higress Team',
+                category: 'api-integration'
+            }
+        });
+
+        // 测试用例 2: http 类型
+        const httpSchema = {
+            identifier: 'awesome-api-test',
+            name: 'Awesome API Test',
+            author: 'Smithery',
+            description: 'Awesome API integration (测试版)',
+            version: '2.0.0',
+            config: {
+                type: 'http',
+                url: 'https://api.smithery.ai/v1/mcp',
+                headers: {
+                    'Authorization': 'Bearer test-token',
+                    'X-Custom-Header': 'test-value'
+                }
+            }
+        };
+
+        const httpUrl = generateRFCProtocolUrl({
+            id: 'awesome-api-test',
+            schema: httpSchema,
+            marketId: 'smithery'
+        });
+
+        // 测试用例 3: 特殊字符
+        const specialSchema = {
+            identifier: 'special-chars-test',
+            name: '特殊字符插件 ñ 🚀',
+            author: 'Test <test@example.com>',
+            description: 'Description with "quotes" and \'apostrophes\' (测试)',
+            version: '1.0.0',
+            config: {
+                type: 'stdio',
+                command: 'node',
+                args: ['test script.js', 'arg/with/slashes']
+            }
+        };
+
+        const specialUrl = generateRFCProtocolUrl({
+            id: 'special-chars-test',
+            schema: specialSchema,
+            metaParams: {
+                emoji: '🎉',
+                chinese: '中文测试'
+            }
+        });
+
+        // 设置URL和链接
+        document.getElementById('stdio-url').textContent = stdioUrl;
+        document.getElementById('stdio-link').href = stdioUrl;
+        
+        document.getElementById('http-url').textContent = httpUrl;
+        document.getElementById('http-link').href = httpUrl;
+        
+        document.getElementById('special-url').textContent = specialUrl;
+        document.getElementById('special-link').href = specialUrl;
+
+        // 添加点击事件日志
+        document.querySelectorAll('.test-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                console.log('点击协议链接:', e.target.href);
+                // 不阻止默认行为，让系统处理协议链接
+            });
+        });
+
+        console.log('🧪 测试URL已生成:');
+        console.log('stdio:', stdioUrl);
+        console.log('http:', httpUrl);
+        console.log('special:', specialUrl);
+    </script>
+</body>
+</html> 

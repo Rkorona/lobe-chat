@@ -11,27 +11,65 @@ export enum ProtocolSource {
 }
 
 /**
- * MCP安装协议参数
+ * MCP Schema - stdio 配置类型
  */
-export interface McpInstallProtocolParams {
-  /** 安装后是否自动配置（可选，默认false） */
-  autoConfig?: boolean;
-  /** MCP插件标识符 */
+export interface McpStdioConfig {
+  args?: string[];
+  command: string;
+  env?: Record<string, string>;
+  type: 'stdio';
+}
+
+/**
+ * MCP Schema - http 配置类型
+ */
+export interface McpHttpConfig {
+  headers?: Record<string, string>;
+  type: 'http';
+  url: string;
+}
+
+/**
+ * MCP Schema 配置类型
+ */
+export type McpConfig = McpStdioConfig | McpHttpConfig;
+
+/**
+ * MCP Schema 对象
+ * 符合 RFC 0001 定义
+ */
+export interface McpSchema {
+  /** 插件作者 */
+  author: string;
+  /** 插件配置 */
+  config: McpConfig;
+  /** 插件描述 */
+  description: string;
+  /** 插件主页 */
+  homepage?: string;
+  /** 插件唯一标识符，必须与URL中的id参数匹配 */
   identifier: string;
-  /** 插件清单URL（可选，用于验证和获取详细信息） */
-  manifestUrl?: string;
-  /** 预设配置参数（可选） */
-  presetConfig?: Record<string, unknown>;
-  /** 安装来源 */
-  source: ProtocolSource;
-  /** 来源平台信息（用于统计和验证） */
-  sourcePlatform?: {
-    name: string;
-    url?: string;
-    version?: string;
-  };
-  /** 版本号（可选，默认为latest） */
-  version?: string;
+  /** 插件名称 */
+  name: string;
+  /** 插件版本 (semver) */
+  version: string;
+}
+
+/**
+ * RFC 0001 协议参数
+ * lobehub://plugin/install?type=mcp&id=xxx&schema=xxx&marketId=xxx&meta_*=xxx
+ */
+export interface McpInstallProtocolParamsRFC {
+  /** 可选的 UI 显示元数据，以 meta_ 为前缀 */
+  [key: `meta_${string}`]: string | undefined;
+  /** 插件的唯一标识符 */
+  id: string;
+  /** 提供该插件的 Marketplace 的唯一标识符 */
+  marketId?: string;
+  /** Base64URL 编码的 MCP Schema 对象 */
+  schema: string;
+  /** 插件类型，对于 MCP 固定为 'mcp' */
+  type: 'mcp';
 }
 
 /**
@@ -39,7 +77,9 @@ export interface McpInstallProtocolParams {
  */
 export interface ProtocolUrlParsed {
   action: 'install' | 'configure' | 'update';
-  params: McpInstallProtocolParams;
+  marketId?: string;
+  metaParams: Record<string, string>;
+  schema: McpSchema;
   type: 'mcp' | 'plugin';
 }
 

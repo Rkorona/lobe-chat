@@ -1,7 +1,7 @@
 import {
-  type McpInstallProtocolParams,
+  McpSchema,
   ProtocolSource,
-  type ProtocolUrlParsed,
+  ProtocolUrlParsed,
 } from '@/types/plugins/protocol';
 
 /**
@@ -19,12 +19,70 @@ export function getProtocolScheme(): string {
 }
 
 /**
+ * 验证 MCP Schema 对象结构
+ * @param schema 待验证的对象
+ * @returns 是否为有效的 MCP Schema
+ */
+function validateMcpSchema(schema: any): schema is McpSchema {
+  if (!schema || typeof schema !== 'object') return false;
+  
+  // 必填字段验证
+  if (typeof schema.identifier !== 'string' || !schema.identifier) return false;
+  if (typeof schema.name !== 'string' || !schema.name) return false;
+  if (typeof schema.author !== 'string' || !schema.author) return false;
+  if (typeof schema.description !== 'string' || !schema.description) return false;
+  if (typeof schema.version !== 'string' || !schema.version) return false;
+  
+  // 可选字段验证
+  if (schema.homepage !== undefined && typeof schema.homepage !== 'string') return false;
+  
+  // config 字段验证
+  if (!schema.config || typeof schema.config !== 'object') return false;
+  const config = schema.config;
+  
+  if (config.type === 'stdio') {
+    if (typeof config.command !== 'string' || !config.command) return false;
+    if (config.args !== undefined && !Array.isArray(config.args)) return false;
+    if (config.env !== undefined && typeof config.env !== 'object') return false;
+  } else if (config.type === 'http') {
+    if (typeof config.url !== 'string' || !config.url) return false;
+    try {
+      new URL(config.url); // 验证URL格式
+    } catch {
+      return false;
+    }
+    if (config.headers !== undefined && typeof config.headers !== 'object') return false;
+  } else {
+    return false; // 未知的 config type
+  }
+  
+  return true;
+}
+
+/**
+ * 将 marketId 映射到 ProtocolSource
+ */
+function mapMarketIdToSource(marketId?: string): ProtocolSource {
+  if (!marketId) return ProtocolSource.THIRD_PARTY; // 未知来源
+  
+  // 根据 marketId 映射到对应的 source
+  const marketSourceMap: Record<string, ProtocolSource> = {
+    'lobehub': ProtocolSource.OFFICIAL,
+    'higress': ProtocolSource.THIRD_PARTY,
+    'smithery': ProtocolSource.THIRD_PARTY,
+    // 可以添加更多映射
+  };
+  
+  return marketSourceMap[marketId.toLowerCase()] || ProtocolSource.THIRD_PARTY;
+}
+
+/**
  * 解析 lobehub:// 协议URL (支持多版本协议)
  *
  * 支持的URL格式：
- * - lobehub://mcp/install?identifier=figma&source=official
- * - lobehub-nightly://mcp/install?identifier=figma&source=official
- * - lobehub-beta://mcp/install?identifier=figma&source=official
+ * - lobehub://plugin/install?type=mcp&id=figma&schema=xxx&marketId=lobehub
+ * - lobehub-nightly://plugin/install?type=mcp&id=figma&schema=xxx&marketId=lobehub
+ * - lobehub-beta://plugin/install?type=mcp&id=figma&schema=xxx&marketId=lobehub
  *
  * @param url 协议URL
  * @returns 解析结果
@@ -32,103 +90,143 @@ export function getProtocolScheme(): string {
 export function parseProtocolUrl(url: string): ProtocolUrlParsed | null {
   try {
     const parsedUrl = new URL(url);
-
+    
     // 支持多种协议 scheme
     const validProtocols = ['lobehub:', 'lobehub-nightly:', 'lobehub-beta:'];
     if (!validProtocols.includes(parsedUrl.protocol)) {
       return null;
     }
-
+    
     const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
     if (pathParts.length < 2) {
       return null;
     }
-
-    const [type, action] = pathParts;
-
-    if (type !== 'mcp' || action !== 'install') {
+    
+    const [urlType, action] = pathParts;
+    
+    // RFC 要求路径为 /plugin/install
+    if (urlType !== 'plugin' || action !== 'install') {
       return null;
     }
-
-    // 解析参数 - 支持JSON和query string两种格式
-    let params: McpInstallProtocolParams;
-
-    const search = parsedUrl.search.slice(1); // 去掉 ?
-
-    if (search.startsWith('{')) {
-      // JSON格式
-      try {
-        params = JSON.parse(decodeURIComponent(search));
-      } catch {
-        return null;
-      }
-    } else {
-      // Query string格式
-      const searchParams = new URLSearchParams(search);
-      params = {
-        autoConfig: searchParams.get('autoConfig') === 'true',
-        identifier: searchParams.get('identifier') || '',
-        manifestUrl: searchParams.get('manifestUrl') || undefined,
-        presetConfig: searchParams.get('presetConfig')
-          ? JSON.parse(decodeURIComponent(searchParams.get('presetConfig')!))
-          : undefined,
-        source: (searchParams.get('source') as ProtocolSource) || ProtocolSource.OFFICIAL,
-        version: searchParams.get('version') || undefined,
-      };
-    }
-
+    
+    // 解析查询参数
+    const searchParams = new URLSearchParams(parsedUrl.search);
+    
     // 验证必需参数
-    if (!params.identifier || !params.source) {
+    const type = searchParams.get('type');
+    const id = searchParams.get('id');
+    const schemaParam = searchParams.get('schema');
+    
+    if (type !== 'mcp' || !id || !schemaParam) {
       return null;
     }
-
-    // 验证source是否为有效值
-    if (!Object.values(ProtocolSource).includes(params.source)) {
+    
+    // 解码和解析 schema
+    let mcpSchema: McpSchema;
+    try {
+      // URLSearchParams.get() 已经自动解码了，不需要再次解码
+      mcpSchema = JSON.parse(schemaParam);
+    } catch (error) {
+      console.error('Failed to parse schema:', error);
       return null;
     }
-
+    
+    // 验证 schema
+    if (!validateMcpSchema(mcpSchema)) {
+      console.error('Invalid MCP Schema structure');
+      return null;
+    }
+    
+    // 验证 identifier 与 id 参数匹配
+    if (mcpSchema.identifier !== id) {
+      console.error('Schema identifier does not match URL id parameter');
+      return null;
+    }
+    
+    // 解析可选参数
+    const marketId = searchParams.get('marketId') || undefined;
+    
+    // 解析 meta_* 参数
+    const metaParams: Record<string, string> = {};
+    for (const [key, value] of searchParams.entries()) {
+      if (key.startsWith('meta_')) {
+        metaParams[key] = value;
+      }
+    }
+    
+    // 返回符合新接口的对象
     return {
-      action: 'install',
-      params,
       type: 'mcp',
+      action: 'install',
+      schema: mcpSchema,
+      marketId,
+      metaParams,
     };
   } catch (error) {
-    console.error('Failed to parse protocol URL:', error);
+    console.error('Failed to parse RFC protocol URL:', error);
     return null;
   }
 }
 
 /**
- * 生成协议URL (使用当前应用的协议 scheme)
- *
- * @param params MCP安装参数
- * @param format URL格式 ('json' | 'query')
+ * 生成符合 RFC 0001 的协议 URL
+ * 
+ * @param params 协议参数
  * @returns 生成的协议URL
  */
-export function generateProtocolUrl(
-  params: McpInstallProtocolParams,
-  format: 'json' | 'query' = 'json',
-): string {
-  const protocolScheme = getProtocolScheme();
-  const baseUrl = `${protocolScheme}://mcp/install`;
-
-  if (format === 'json') {
-    const encoded = encodeURIComponent(JSON.stringify(params));
-    return `${baseUrl}?${encoded}`;
-  } else {
-    const searchParams = new URLSearchParams();
-    searchParams.set('identifier', params.identifier);
-    searchParams.set('source', params.source);
-
-    if (params.manifestUrl) searchParams.set('manifestUrl', params.manifestUrl);
-    if (params.version) searchParams.set('version', params.version);
-    if (params.autoConfig) searchParams.set('autoConfig', 'true');
-    if (params.presetConfig) {
-      searchParams.set('presetConfig', encodeURIComponent(JSON.stringify(params.presetConfig)));
-    }
-
-    return `${baseUrl}?${searchParams.toString()}`;
+export function generateRFCProtocolUrl(params: {
+  /** 插件唯一标识符 */
+  id: string;
+  /** MCP Schema 对象 */
+  schema: McpSchema;
+  /** Marketplace ID */
+  marketId?: string;
+  /** 元数据参数 */
+  metaParams?: Record<string, string>;
+  /** 协议 scheme (默认: lobehub) */
+  scheme?: string;
+}): string {
+  const { id, schema, marketId, metaParams = {}, scheme = 'lobehub' } = params;
+  
+  // 验证 schema.identifier 与 id 匹配
+  if (schema.identifier !== id) {
+    throw new Error('Schema identifier must match the id parameter');
   }
+  
+  // 验证 schema 结构
+  if (!validateMcpSchema(schema)) {
+    throw new Error('Invalid MCP Schema structure');
+  }
+  
+  // 构建基础 URL
+  const baseUrl = `${scheme}://plugin/install`;
+  
+  // 构建查询参数
+  const searchParams = new URLSearchParams();
+  
+  // 必需参数
+  searchParams.set('type', 'mcp');
+  searchParams.set('id', id);
+  
+  // 编码 schema - 直接传 JSON 字符串，让 URLSearchParams 自动编码
+  const schemaJson = JSON.stringify(schema);
+  searchParams.set('schema', schemaJson);
+  
+  // 可选参数
+  if (marketId) {
+    searchParams.set('marketId', marketId);
+  }
+  
+  // 添加 meta_* 参数
+  for (const [key, value] of Object.entries(metaParams)) {
+    if (!key.startsWith('meta_')) {
+      searchParams.set(`meta_${key}`, value);
+    } else {
+      searchParams.set(key, value);
+    }
+  }
+  
+  return `${baseUrl}?${searchParams.toString()}`;
 }
 
 /**

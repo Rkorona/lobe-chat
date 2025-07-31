@@ -1,41 +1,37 @@
-import { name } from '@/../../package.json';
-import { McpInstallProtocolParams, ProtocolSource, ProtocolUrlParsed } from '@/types/protocol';
+import { app } from 'electron';
 
-/**
- * Get protocol scheme based on app version
- * 根据应用版本获取协议 scheme
- */
+import { McpSchema, ProtocolSource, ProtocolUrlParsed } from '../types/protocol';
+
+export type AppChannel = 'stable' | 'beta' | 'nightly' | 'dev';
+
 export const getProtocolScheme = (): string => {
-  const channel = process.env.UPDATE_CHANNEL;
-  const isNightly = channel === 'nightly';
-  const isBeta = name.includes('beta');
+  // 在 Electron 环境中可以通过多种方式判断版本
+  const bundleId = app.name;
+  const appPath = app.getPath('exe');
 
-  if (isNightly) return 'lobehub-nightly';
-  if (isBeta) return 'lobehub-beta';
+  // 通过 bundle identifier 判断
+  if (bundleId?.includes('nightly')) return 'lobehub-nightly';
+  if (bundleId?.includes('beta')) return 'lobehub-beta';
+  if (bundleId?.includes('dev')) return 'lobehub-dev';
+
+  // 通过可执行文件路径判断
+  if (appPath?.includes('nightly')) return 'lobehub-nightly';
+  if (appPath?.includes('beta')) return 'lobehub-beta';
+  if (appPath?.includes('dev')) return 'lobehub-dev';
+
   return 'lobehub';
 };
 
-/**
- * Get version info including channel and protocol scheme
- * 获取版本信息，包括频道和协议 scheme
- */
-export const getVersionInfo = () => {
-  const channel = process.env.UPDATE_CHANNEL;
-  const isNightly = channel === 'nightly';
-  const isBeta = name.includes('beta');
+export const getVersionInfo = (): { channel: AppChannel; protocolScheme: string } => {
+  const protocolScheme = getProtocolScheme();
 
-  let appChannel: 'nightly' | 'beta' | 'stable';
-  let protocolScheme: string;
-
-  if (isNightly) {
+  let appChannel: AppChannel = 'stable';
+  if (protocolScheme.includes('nightly')) {
     appChannel = 'nightly';
-    protocolScheme = 'lobehub-nightly';
-  } else if (isBeta) {
+  } else if (protocolScheme.includes('beta')) {
     appChannel = 'beta';
-    protocolScheme = 'lobehub-beta';
-  } else {
-    appChannel = 'stable';
-    protocolScheme = 'lobehub';
+  } else if (protocolScheme.includes('dev')) {
+    appChannel = 'dev';
   }
 
   return {
@@ -45,12 +41,70 @@ export const getVersionInfo = () => {
 };
 
 /**
+ * 验证 MCP Schema 对象结构
+ * @param schema 待验证的对象
+ * @returns 是否为有效的 MCP Schema
+ */
+function validateMcpSchema(schema: any): schema is McpSchema {
+  if (!schema || typeof schema !== 'object') return false;
+
+  // 必填字段验证
+  if (typeof schema.identifier !== 'string' || !schema.identifier) return false;
+  if (typeof schema.name !== 'string' || !schema.name) return false;
+  if (typeof schema.author !== 'string' || !schema.author) return false;
+  if (typeof schema.description !== 'string' || !schema.description) return false;
+  if (typeof schema.version !== 'string' || !schema.version) return false;
+
+  // 可选字段验证
+  if (schema.homepage !== undefined && typeof schema.homepage !== 'string') return false;
+
+  // config 字段验证
+  if (!schema.config || typeof schema.config !== 'object') return false;
+  const config = schema.config;
+
+  if (config.type === 'stdio') {
+    if (typeof config.command !== 'string' || !config.command) return false;
+    if (config.args !== undefined && !Array.isArray(config.args)) return false;
+    if (config.env !== undefined && typeof config.env !== 'object') return false;
+  } else if (config.type === 'http') {
+    if (typeof config.url !== 'string' || !config.url) return false;
+    try {
+      new URL(config.url); // 验证URL格式
+    } catch {
+      return false;
+    }
+    if (config.headers !== undefined && typeof config.headers !== 'object') return false;
+  } else {
+    return false; // 未知的 config type
+  }
+
+  return true;
+}
+
+/**
+ * 将 marketId 映射到 ProtocolSource
+ */
+function mapMarketIdToSource(marketId?: string): ProtocolSource {
+  if (!marketId) return ProtocolSource.THIRD_PARTY; // 未知来源
+
+  // 根据 marketId 映射到对应的 source
+  const marketSourceMap: Record<string, ProtocolSource> = {
+    higress: ProtocolSource.THIRD_PARTY,
+    lobehub: ProtocolSource.OFFICIAL,
+    smithery: ProtocolSource.THIRD_PARTY,
+    // 可以添加更多映射
+  };
+
+  return marketSourceMap[marketId.toLowerCase()] || ProtocolSource.THIRD_PARTY;
+}
+
+/**
  * 解析 lobehub:// 协议URL (支持多版本协议)
  *
  * 支持的URL格式：
- * - lobehub://mcp/install?identifier=figma&source=official
- * - lobehub-nightly://mcp/install?identifier=figma&source=official
- * - lobehub-beta://mcp/install?identifier=figma&source=official
+ * - lobehub://plugin/install?type=mcp&id=figma&schema=xxx&marketId=lobehub
+ * - lobehub-nightly://plugin/install?type=mcp&id=figma&schema=xxx&marketId=lobehub
+ * - lobehub-beta://plugin/install?type=mcp&id=figma&schema=xxx&marketId=lobehub
  *
  * @param url 协议URL
  * @returns 解析结果
@@ -65,61 +119,162 @@ export function parseProtocolUrl(url: string): ProtocolUrlParsed | null {
       return null;
     }
 
-    const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
-    if (pathParts.length < 2) {
+    // 在自定义协议中，hostname 是第一部分，pathname 是剩余部分
+    // 例如：lobehub://plugin/install -> hostname: "plugin", pathname: "/install"
+    const urlType = parsedUrl.hostname;
+    const pathPart = parsedUrl.pathname.split('/').find(Boolean);
+    const action = pathPart;
+
+    // RFC 要求路径为 /plugin/install
+    if (urlType !== 'plugin' || action !== 'install') {
       return null;
     }
 
-    const [type, action] = pathParts;
-
-    if (type !== 'mcp' || action !== 'install') {
-      return null;
-    }
-
-    // 解析参数 - 支持JSON和query string两种格式
-    let params: McpInstallProtocolParams;
-
-    const search = parsedUrl.search.slice(1); // 去掉 ?
-
-    if (search.startsWith('{')) {
-      // JSON格式
-      try {
-        params = JSON.parse(decodeURIComponent(search));
-      } catch {
-        return null;
-      }
-    } else {
-      // Query string格式
-      const searchParams = new URLSearchParams(search);
-      params = {
-        autoConfig: searchParams.get('autoConfig') === 'true',
-        identifier: searchParams.get('identifier') || '',
-        manifestUrl: searchParams.get('manifestUrl') || undefined,
-        presetConfig: searchParams.get('presetConfig')
-          ? JSON.parse(decodeURIComponent(searchParams.get('presetConfig')!))
-          : undefined,
-        source: (searchParams.get('source') as ProtocolSource) || ProtocolSource.OFFICIAL,
-        version: searchParams.get('version') || undefined,
-      };
-    }
+    // 解析查询参数
+    const searchParams = new URLSearchParams(parsedUrl.search);
 
     // 验证必需参数
-    if (!params.identifier || !params.source) {
+    const type = searchParams.get('type');
+    const id = searchParams.get('id');
+    const schemaParam = searchParams.get('schema');
+
+    if (type !== 'mcp' || !id || !schemaParam) {
       return null;
     }
 
-    // 验证source是否为有效值
-    if (!Object.values(ProtocolSource).includes(params.source)) {
+    // 解码和解析 schema
+    let mcpSchema: McpSchema;
+    try {
+      // URLSearchParams.get() 已经自动解码了，不需要再次解码
+      mcpSchema = JSON.parse(schemaParam);
+    } catch (error) {
+      console.error('Failed to parse schema:', error);
       return null;
     }
 
+    // 验证 schema
+    if (!validateMcpSchema(mcpSchema)) {
+      console.error('Invalid MCP Schema structure');
+      return null;
+    }
+
+    // 验证 identifier 与 id 参数匹配
+    if (mcpSchema.identifier !== id) {
+      console.error('Schema identifier does not match URL id parameter');
+      return null;
+    }
+
+    // 解析可选参数
+    const marketId = searchParams.get('marketId') || undefined;
+
+    // 解析 meta_* 参数
+    const metaParams: Record<string, string> = {};
+    for (const [key, value] of searchParams.entries()) {
+      if (key.startsWith('meta_')) {
+        metaParams[key] = value;
+      }
+    }
+
+    // 返回符合新接口的对象
     return {
       action: 'install',
-      params,
+      marketId,
+      metaParams,
+      schema: mcpSchema,
       type: 'mcp',
     };
   } catch (error) {
-    console.error('Failed to parse protocol URL:', error);
+    console.error('Failed to parse RFC protocol URL:', error);
     return null;
   }
 }
+
+/**
+ * 生成符合 RFC 0001 的协议 URL
+ *
+ * @param params 协议参数
+ * @returns 生成的协议URL
+ */
+export function generateRFCProtocolUrl(params: {
+  /** 插件唯一标识符 */
+  id: string;
+  /** Marketplace ID */
+  marketId?: string;
+  /** 元数据参数 */
+  metaParams?: Record<string, string>;
+  /** MCP Schema 对象 */
+  schema: McpSchema;
+  /** 协议 scheme (默认: lobehub) */
+  scheme?: string;
+}): string {
+  const { id, schema, marketId, metaParams = {}, scheme = 'lobehub' } = params;
+
+  // 验证 schema.identifier 与 id 匹配
+  if (schema.identifier !== id) {
+    throw new Error('Schema identifier must match the id parameter');
+  }
+
+  // 验证 schema 结构
+  if (!validateMcpSchema(schema)) {
+    throw new Error('Invalid MCP Schema structure');
+  }
+
+  // 构建基础 URL
+  const baseUrl = `${scheme}://plugin/install`;
+
+  // 构建查询参数
+  const searchParams = new URLSearchParams();
+
+  // 必需参数
+  searchParams.set('type', 'mcp');
+  searchParams.set('id', id);
+
+  // 编码 schema - 直接传 JSON 字符串，让 URLSearchParams 自动编码
+  const schemaJson = JSON.stringify(schema);
+  searchParams.set('schema', schemaJson);
+
+  // 可选参数
+  if (marketId) {
+    searchParams.set('marketId', marketId);
+  }
+
+  // 添加 meta_* 参数
+  for (const [key, value] of Object.entries(metaParams)) {
+    if (!key.startsWith('meta_')) {
+      searchParams.set(`meta_${key}`, value);
+    } else {
+      searchParams.set(key, value);
+    }
+  }
+
+  return `${baseUrl}?${searchParams.toString()}`;
+}
+
+/**
+ * 生成协议 URL 示例
+ *
+ * @example
+ * ```typescript
+ * const url = generateRFCProtocolUrl({
+ *   id: 'edgeone-mcp',
+ *   schema: {
+ *     identifier: 'edgeone-mcp',
+ *     name: 'EdgeOne MCP',
+ *     author: 'Higress Team',
+ *     description: 'EdgeOne API integration for LobeChat',
+ *     version: '1.0.0',
+ *     config: {
+ *       type: 'stdio',
+ *       command: 'npx',
+ *       args: ['-y', '@higress/edgeone-mcp']
+ *     }
+ *   },
+ *   marketId: 'higress',
+ *   metaParams: {
+ *     author: 'Higress Team',
+ *     category: 'api-integration'
+ *   }
+ * });
+ * // Result: lobehub://plugin/install?type=mcp&id=edgeone-mcp&schema=%7B%22identifier%22%3A...&marketId=higress&meta_author=Higress%20Team&meta_category=api-integration
+ * ```
+ */
